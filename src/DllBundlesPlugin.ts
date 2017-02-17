@@ -8,9 +8,9 @@ import { DllBundlesPluginOptions, DllBundleConfig } from './interfaces';
 import { DllBundlesControl } from './DllBundlesControl';
 
 export class DllBundlesPlugin {
-  private compiler: any;
   private bundles: DllBundleConfig[];
   private bundleControl: DllBundlesControl;
+  private bundleValidationProcess: Promise<void>;
   private options: DllBundlesPluginOptions;
 
   constructor(options: DllBundlesPluginOptions) {
@@ -18,8 +18,6 @@ export class DllBundlesPlugin {
   }
 
   apply(compiler: any) {
-    this.compiler = compiler;
-
     const newPlugins = this.bundles.map( b => new DllReferencePlugin({
         context: this.options.context,
         manifest: Path.join(this.options.dllDir, `${b.name}-manifest.json`)
@@ -32,44 +30,53 @@ export class DllBundlesPlugin {
     compiler.plugin('watch-run', (compiler, next) => this.run(next) );
   }
 
-
   run(next: (err?: Error) => any): void {
-    console.info('DLL: Checking if DLLs are valid.');
-    this.bundleControl.checkBundles()
-      .then( bundles => {
-        if (bundles.length === 0) {
-          return console.info('DLL: All DLLs are valid.');
-        } else {
-          console.info('DLL: Rebuilding...');
+    if (!this.bundleValidationProcess) {
+      console.info('DLL: Checking if DLLs are valid.');
 
-          const newEntry = this.bundles.reduce( (prev, curr) => {
-            prev[curr.name] = curr.packages.map( p => typeof p === 'string' ? p : p.path );
-            return prev;
-          }, {} as any);
+      this.bundleValidationProcess = this.bundleControl
+        .checkBundles()
+        .then( bundles => {
+          if (bundles.length === 0) {
+            return console.info('DLL: All DLLs are valid.');
+          } else {
+            console.info('DLL: Rebuilding...');
 
-          const webpackConfig = Object.assign({}, this.options.webpackConfig, {
-            entry: newEntry,
-            output: {
-              path: this.options.dllDir,
-              filename: '[name].dll.js',
-              library: '[name]_lib'
-            },
-          });
+            const newEntry = this.bundles.reduce( (prev, curr) => {
+              prev[curr.name] = curr.packages.map( p => typeof p === 'string' ? p : p.path );
+              return prev;
+            }, {} as any);
 
+            const webpackConfig = Object.assign({}, this.options.webpackConfig, {
+              entry: newEntry,
+              output: {
+                path: this.options.dllDir,
+                filename: '[name].dll.js',
+                library: '[name]_lib'
+              }
+            });
 
-          if (!webpackConfig.plugins) {
-            webpackConfig.plugins = [];
+            if (!webpackConfig.plugins) {
+              webpackConfig.plugins = [];
+            }
+
+            webpackConfig.plugins.push(new DllPlugin({
+              path: Path.join(this.options.dllDir, '[name]-manifest.json'),
+              name: '[name]_lib',
+            }));
+
+            return runWebpack(webpackConfig).done
+              .then( stats => this.bundleControl.saveBundleState() )
+              .then( () => console.info('DLL: Bundling done, all DLLs are valid.') );
           }
-          webpackConfig.plugins.push(new DllPlugin({
-            path: Path.join(this.options.dllDir, '[name]-manifest.json'),
-            name: '[name]_lib',
-          }));
+        })
+        .then(
+          () => this.bundleValidationProcess = null,
+          () => this.bundleValidationProcess = null
+        );
+    }
 
-          return runWebpack(webpackConfig).done
-            .then( stats => this.bundleControl.saveBundleState() )
-            .then( () => console.info('DLL: Bundling done, all DLLs are valid.') );
-        }
-      })
+    this.bundleValidationProcess
       .then( () => next() )
       .catch( err => next(err) );
   }
