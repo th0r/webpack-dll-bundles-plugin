@@ -8,6 +8,9 @@ export interface DllBundleConfig {
   packages: Array<string | DllPackageConfig>;
 }
 
+export interface BundleCacheIdFunction {
+  (bundleName: string): string;
+}
 
 export interface DllBundlesPluginOptions {
   bundles: { [key: string]: Array<string | DllPackageConfig>}
@@ -51,7 +54,7 @@ export interface DllBundlesPluginOptions {
    *
    * @default false
    */
-  ignorePackageError?: boolean
+  ignorePackageError?: boolean;
 
   /**
    * The context for the plugin.
@@ -62,4 +65,25 @@ export interface DllBundlesPluginOptions {
    * @default process.cwd()
    */
   context?: string;
+
+  /**
+   * Bundle cache ID (checksum) that will be used as additional parameter to check cache validity.
+   *
+   * By default bundle cache is considered to be valid if it contains the same modules with the same versions.
+   * It doesn't take into account any extra parameters e.g. webpack configuration so, for example, normal and minified
+   * bundle with the same modules will be considered equal and won't be rebuilt.
+   *
+   * This options helps to solve it: you can construct any string that will identify this build of the bundle.
+   *
+   * For example, you can set something like this:
+   * `JSON.stringify({env: webpackConfigOpts.env, minify: webpackConfigOpts.minify})`.
+   *
+   * Resulting string will be save to `dll-bundles-state.json` and bundle will be rebuilt if it doesn't match
+   * the new value.
+   *
+   * Can be a string or a function returning a string.
+   *
+   * @default undefined
+   */
+  bundleCacheId?: string | BundleCacheIdFunction;
 }
